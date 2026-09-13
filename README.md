@@ -92,3 +92,4 @@ Once flashing finishes, all 3 user LEDs (**Green**, **Yellow**, and **Red**) wil
 ## License
 
 Hardware driver components and CMSIS files are copyright STMicroelectronics and ARM Limited. See individual file headers and `LICENSE` files within the `Drivers/` directory for details.
+
