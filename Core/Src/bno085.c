@@ -1,0 +1,101 @@
+#include "bno085.h"
+#include <stdio.h>
+
+void BNO085_Init(BNO085_t *dev, SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, uint16_t cs_pin, GPIO_TypeDef *rst_port, uint16_t rst_pin, GPIO_TypeDef *hintn_port, uint16_t hintn_pin){
+    dev->hspi       = hspi;
+    dev->cs_port    = cs_port;
+    dev->cs_pin     = cs_pin;
+    dev->rst_port   = rst_port;
+    dev->rst_pin    = rst_pin;
+    dev->hintn_port = hintn_port;
+    dev->hintn_pin  = hintn_pin;
+
+    // Deselect chip and ensure reset is high
+    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(dev->rst_port, dev->rst_pin, GPIO_PIN_SET);
+}
+
+void BNO085_HardwareReset(BNO085_t *dev){
+    HAL_GPIO_WritePin(dev->rst_port, dev->rst_pin, GPIO_PIN_RESET);
+    HAL_Delay(15);
+    HAL_GPIO_WritePin(dev->rst_port, dev->rst_pin, GPIO_PIN_SET);
+}
+
+bool BNO085_WaitHINTN(BNO085_t *dev, uint32_t timeout_ms){
+    uint32_t deadline = HAL_GetTick() + timeout_ms;
+    while (HAL_GPIO_ReadPin(dev->hintn_port, dev->hintn_pin) == GPIO_PIN_SET){
+        if (HAL_GetTick() > deadline){
+            return false;
+        }
+    }
+    return true;
+}
+
+HAL_StatusTypeDef BNO085_ReadHeader(BNO085_t *dev, SHTP_Header_t *header){
+    uint8_t tx_dummy[4] = {0x00, 0x00, 0x00, 0x00};
+    uint8_t rx_raw[4] = {0x00, 0x00, 0x00, 0x00};
+
+    // Assert CS
+    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, GPIO_PIN_RESET);
+
+    // Clock out 4 dummy to read the SHTP Header
+    HAL_StatusTypeDef status = HAL_SPI_TransmitReceive(dev->hspi, tx_dummy, rx_raw, 4, 100);
+
+    // Deassert CS
+    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, GPIO_PIN_SET);
+
+    if (status != HAL_OK){
+        return status;
+    }
+
+    // Parse SHTP Header
+    header->length              = (uint16_t)rx_raw[0] | (((uint16_t)(rx_raw[1] & 0x7F)) << 8);
+    header->has_continuation    = (rx_raw[1] & 0x80) != 0;
+    header->channel             = rx_raw[2];
+    header->sequence            = rx_raw[3];
+
+    return HAL_OK;
+}
+
+HAL_StatusTypeDef BNO085_Stage1_Test(BNO085_t *dev)
+{
+    printf("\r\n========================================\r\n");
+    printf("   BNO085 Stage 1: SPI Proof-of-Life\r\n");
+    printf("========================================\r\n");
+    /* 1. Pulse Hardware Reset */
+    printf("[1/3] Resetting BNO085...\r\n");
+    BNO085_HardwareReset(dev);
+    /* 2. Wait for HINTN assertion */
+    printf("[2/3] Waiting for HINTN falling edge...\r\n");
+    if (!BNO085_WaitHINTN(dev, 1000))
+    {
+        printf("[FAIL] HINTN timeout! Check PS0/PS1 (both must be 3.3V) and RST wiring.\r\n");
+        return HAL_TIMEOUT;
+    }
+    printf("[OK] HINTN asserted LOW! Sensor is ready.\r\n");
+    /* 3. Read SHTP Header */
+    printf("[3/3] Reading 4-Byte SHTP Header via SPI2...\r\n");
+    SHTP_Header_t hdr = {0};
+    HAL_StatusTypeDef status = BNO085_ReadHeader(dev, &hdr);
+    if (status != HAL_OK)
+    {
+        printf("[FAIL] SPI transfer error: %d\r\n", status);
+        return status;
+    }
+    printf("----------------------------------------\r\n");
+    printf("Packet Length : %u bytes\r\n", hdr.length);
+    printf("Channel       : %u\r\n", hdr.channel);
+    printf("Sequence No   : %u\r\n", hdr.sequence);
+    printf("Continuation  : %s\r\n", hdr.has_continuation ? "Yes" : "No");
+    printf("----------------------------------------\r\n");
+    if (hdr.length > 4 && (hdr.channel == SHTP_CHAN_COMMAND || hdr.channel == SHTP_CHAN_CONTROL))
+    {
+        printf(">>> SUCCESS: Valid BNO085 advertisement received! SPI2 is operational! <<<\r\n");
+        return HAL_OK;
+    }
+    else
+    {
+        printf("[WARNING] Header invalid or empty. Verify SPI Mode 3 (CPOL=1, CPHA=1) and MISO pin.\r\n");
+        return HAL_ERROR;
+    }
+}
