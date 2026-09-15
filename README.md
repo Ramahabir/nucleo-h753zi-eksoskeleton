@@ -4,6 +4,9 @@ Production-ready firmware template and high-speed **BNO085 9-DOF IMU Sensor Hub 
 
 This project implements the official **CEVA / Hillcrest Laboratories SHTP (Sensor Hub Transport Protocol)** over full-duplex SPI, enabling high-rate, low-latency streaming of **Game Rotation Vector Quaternions** and real-time **Euler Angles (Yaw, Pitch, Roll)**.
 
+> 📖 **Looking to integrate this driver into another STM32 project?**  
+> Check out the [**BNO085 STM32 Driver Integration Guide**](docs/BNO085_DRIVER_GUIDE.md) for a standalone, board-agnostic integration walkthrough.
+
 ---
 
 ## Hardware Overview
