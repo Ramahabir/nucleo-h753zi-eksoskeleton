@@ -43,6 +43,11 @@ HAL_StatusTypeDef BNO085_ReadHeader(BNO085_t *dev, SHTP_Header_t *header);
 
 HAL_StatusTypeDef BNO085_Stage1_Test(BNO085_t *dev);
 
+uint16_t BNO085_ReadPacket(BNO085_t *dev, uint8_t *buffer, uint16_t buffer_size);
+bool BNO085_SendPacket(BNO085_t *dev, uint8_t *tx_buf, uint16_t len);
+void BNO085_EnableGameRotationVector(BNO085_t *dev);
+void BNO085_Stage2_PollData(BNO085_t *dev);
+
 #ifdef __cplusplus
 }
 #endif

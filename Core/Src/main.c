@@ -19,11 +19,13 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "spi.h"
+#include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "bno085.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -43,10 +45,8 @@
 
 /* Private variables ---------------------------------------------------------*/
 
-COM_InitTypeDef BspCOMInit;
-
 /* USER CODE BEGIN PV */
-
+BNO085_t imu0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -57,7 +57,11 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+extern UART_HandleTypeDef huart6;
+int _write(int file, char *ptr, int len) {
+    HAL_UART_Transmit(&huart6, (uint8_t*)ptr, len, HAL_MAX_DELAY);
+    return len;
+}
 /* USER CODE END 0 */
 
 /**
@@ -89,42 +93,59 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_SPI2_Init();
+  MX_SPI1_Init();
+  MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
-
-  /* USER CODE END 2 */
-
-  /* Initialize leds */
-  BSP_LED_Init(LED_GREEN);
-  BSP_LED_Init(LED_YELLOW);
-  BSP_LED_Init(LED_RED);
-
-  /* Initialize USER push-button, will be used to trigger an interrupt each time it's pressed.*/
-  BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
-
-  /* Initialize COM1 port (115200, 8 bits (7-bit data + 1 stop bit), no parity */
-  BspCOMInit.BaudRate   = 115200;
-  BspCOMInit.WordLength = COM_WORDLENGTH_8B;
-  BspCOMInit.StopBits   = COM_STOPBITS_1;
-  BspCOMInit.Parity     = COM_PARITY_NONE;
-  BspCOMInit.HwFlowCtl  = COM_HWCONTROL_NONE;
-  if (BSP_COM_Init(COM1, &BspCOMInit) != BSP_ERROR_NONE)
-  {
-    Error_Handler();
+  printf("\r\n========================================\r\n");
+  printf("   BNO085 Stage 2: 200Hz Quaternion Stream\r\n");
+  printf("========================================\r\n");
+  
+  BNO085_Init(&imu0, &hspi1, BNO_CS0_GPIO_Port, BNO_CS0_Pin, BNO_RST_GPIO_Port, BNO_RST_Pin, BNO_HINTN0_GPIO_Port, BNO_HINTN0_Pin);
+  
+  printf("[1/4] Hardware Resetting BNO085...\r\n");
+  BNO085_HardwareReset(&imu0);
+  HAL_Delay(300);
+  
+  /*
+   * KEY CHANGE: Send the Set Feature Command FIRST, BEFORE draining.
+   * SendPacket waits for HINTN LOW, which happens when the first boot
+   * packet (276-byte advertisement) is ready. During that CS-low window,
+   * we simultaneously READ the boot packet and WRITE our command.
+   * This is how SHTP SPI full-duplex is designed to work.
+   */
+  printf("[2/4] Sending Set Feature Command (will piggyback on boot packet)...\r\n");
+  BNO085_EnableGameRotationVector(&imu0);
+  
+  printf("[3/4] Draining remaining boot packets...\r\n");
+  uint8_t boot_buf[300];
+  uint32_t drain_start = HAL_GetTick();
+  while ((HAL_GetTick() - drain_start) < 500) {
+      if (HAL_GPIO_ReadPin(imu0.hintn_port, imu0.hintn_pin) == GPIO_PIN_RESET) {
+          uint16_t plen = BNO085_ReadPacket(&imu0, boot_buf, sizeof(boot_buf));
+          if (plen > 0) {
+              printf("  -> Boot/response packet: %u bytes on CH%u (ID: 0x%02X)\r\n", 
+                     plen, boot_buf[2], (plen > 4) ? boot_buf[4] : 0);
+              drain_start = HAL_GetTick();
+          }
+      }
   }
+  printf("[4/4] Boot complete. Polling for sensor data...\r\n");
+  /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  uint32_t hb = HAL_GetTick();
   while (1)
   {
+    BNO085_Stage2_PollData(&imu0);
 
+    if ((HAL_GetTick() - hb) > 2000) {
+        hb = HAL_GetTick();
+        printf("[Status] Waiting for packets... HINTN pin = %d\r\n", HAL_GPIO_ReadPin(imu0.hintn_port, imu0.hintn_pin));
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    BSP_LED_Toggle(LED_GREEN);
-    BSP_LED_Toggle(LED_RED);
-    BSP_LED_Toggle(LED_YELLOW);
-    HAL_Delay(500);
   }
   /* USER CODE END 3 */
 }
@@ -203,6 +224,8 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
+    printf("Hello STM32 - serial via BSP\\r\\n");
+    HAL_Delay(1000);
   }
   /* USER CODE END Error_Handler_Debug */
 }

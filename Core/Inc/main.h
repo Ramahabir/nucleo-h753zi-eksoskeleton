@@ -29,9 +29,6 @@ extern "C" {
 /* Includes ------------------------------------------------------------------*/
 #include "stm32h7xx_hal.h"
 
-#include "stm32h7xx_nucleo.h"
-#include <stdio.h>
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -60,7 +57,7 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define BNO_HINTN0_Pin GPIO_PIN_2
+#define BNO_HINTN0_Pin GPIO_PIN_3
 #define BNO_HINTN0_GPIO_Port GPIOF
 #define BNO_CS0_Pin GPIO_PIN_14
 #define BNO_CS0_GPIO_Port GPIOD
