@@ -58,7 +58,7 @@ void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOD, BNO_CS0_Pin|BNO_RST_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pin Output Level - WAKE starts HIGH (PS0=HIGH = SPI mode) */
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(BNO_WAKE_GPIO_Port, BNO_WAKE_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin : BNO_HINTN0_Pin */
@@ -66,13 +66,6 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(BNO_HINTN0_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : BNO_WAKE_Pin (PG12 / D7) */
-  GPIO_InitStruct.Pin = BNO_WAKE_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(BNO_WAKE_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB15 */
   GPIO_InitStruct.Pin = GPIO_PIN_15;
@@ -96,6 +89,13 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : BNO_WAKE_Pin */
+  GPIO_InitStruct.Pin = BNO_WAKE_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(BNO_WAKE_GPIO_Port, &GPIO_InitStruct);
 
 }
 
