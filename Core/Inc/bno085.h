@@ -23,6 +23,8 @@ typedef struct {
     uint16_t            rst_pin;
     GPIO_TypeDef        *hintn_port;
     uint16_t            hintn_pin;
+    GPIO_TypeDef        *wake_port;
+    uint16_t            wake_pin;
 } BNO085_t;
 
 // SHTP 4-Byte Header Presentation
@@ -34,7 +36,11 @@ typedef struct {
 } SHTP_Header_t;
 
 // Public API
-void BNO085_Init(BNO085_t *dev, SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, uint16_t cs_pin, GPIO_TypeDef *rst_port, uint16_t rst_pin, GPIO_TypeDef *hintn_port, uint16_t hintn_pin);
+void BNO085_Init(BNO085_t *dev, SPI_HandleTypeDef *hspi,
+                 GPIO_TypeDef *cs_port,    uint16_t cs_pin,
+                 GPIO_TypeDef *rst_port,   uint16_t rst_pin,
+                 GPIO_TypeDef *hintn_port, uint16_t hintn_pin,
+                 GPIO_TypeDef *wake_port,  uint16_t wake_pin);
 
 void BNO085_HardwareReset(BNO085_t *dev);
 

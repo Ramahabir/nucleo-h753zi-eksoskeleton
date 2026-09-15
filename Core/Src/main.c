@@ -100,49 +100,50 @@ int main(void)
   printf("   BNO085 Stage 2: 200Hz Quaternion Stream\r\n");
   printf("========================================\r\n");
   
-  BNO085_Init(&imu0, &hspi1, BNO_CS0_GPIO_Port, BNO_CS0_Pin, BNO_RST_GPIO_Port, BNO_RST_Pin, BNO_HINTN0_GPIO_Port, BNO_HINTN0_Pin);
+  BNO085_Init(&imu0, &hspi1,
+              BNO_CS0_GPIO_Port,   BNO_CS0_Pin,
+              BNO_RST_GPIO_Port,   BNO_RST_Pin,
+              BNO_HINTN0_GPIO_Port, BNO_HINTN0_Pin,
+              BNO_WAKE_GPIO_Port,  BNO_WAKE_Pin);
   
-  printf("[1/4] Hardware Resetting BNO085...\r\n");
+  printf("[1/3] Hardware Resetting BNO085...\r\n");
   BNO085_HardwareReset(&imu0);
   HAL_Delay(300);
   
-  /*
-   * KEY CHANGE: Send the Set Feature Command FIRST, BEFORE draining.
-   * SendPacket waits for HINTN LOW, which happens when the first boot
-   * packet (276-byte advertisement) is ready. During that CS-low window,
-   * we simultaneously READ the boot packet and WRITE our command.
-   * This is how SHTP SPI full-duplex is designed to work.
-   */
-  printf("[2/4] Sending Set Feature Command (will piggyback on boot packet)...\r\n");
-  BNO085_EnableGameRotationVector(&imu0);
-  
-  printf("[3/4] Draining remaining boot packets...\r\n");
+  printf("[2/3] Draining boot packets until SH-2 is initialized...\r\n");
   uint8_t boot_buf[300];
   uint32_t drain_start = HAL_GetTick();
-  while ((HAL_GetTick() - drain_start) < 500) {
+  bool sh2_initialized = false;
+  while ((HAL_GetTick() - drain_start) < 2000) {
       if (HAL_GPIO_ReadPin(imu0.hintn_port, imu0.hintn_pin) == GPIO_PIN_RESET) {
           uint16_t plen = BNO085_ReadPacket(&imu0, boot_buf, sizeof(boot_buf));
           if (plen > 0) {
-              printf("  -> Boot/response packet: %u bytes on CH%u (ID: 0x%02X)\r\n", 
+              printf("  -> Boot packet: %u bytes on CH%u (ID: 0x%02X)\r\n", 
                      plen, boot_buf[2], (plen > 4) ? boot_buf[4] : 0);
+              if (boot_buf[2] == 2 && plen >= 5 && boot_buf[4] == 0xF1) {
+                  printf("  [OK] SH-2 System Initialized (0xF1 received)!\r\n");
+                  sh2_initialized = true;
+              }
               drain_start = HAL_GetTick();
+          }
+      } else {
+          if (sh2_initialized && ((HAL_GetTick() - drain_start) > 100)) {
+              break; // Fully initialized and bus is quiet
           }
       }
   }
-  printf("[4/4] Boot complete. Polling for sensor data...\r\n");
+  
+  printf("[3/3] Sending Set Feature Command (200Hz Game Rotation Vector)...\r\n");
+  BNO085_EnableGameRotationVector(&imu0);
+  
+  printf("[READY] Polling for sensor data...\r\n");
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint32_t hb = HAL_GetTick();
   while (1)
   {
     BNO085_Stage2_PollData(&imu0);
-
-    if ((HAL_GetTick() - hb) > 2000) {
-        hb = HAL_GetTick();
-        printf("[Status] Waiting for packets... HINTN pin = %d\r\n", HAL_GPIO_ReadPin(imu0.hintn_port, imu0.hintn_pin));
-    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

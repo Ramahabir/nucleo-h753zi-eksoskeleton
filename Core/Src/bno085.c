@@ -1,7 +1,12 @@
 #include "bno085.h"
 #include <stdio.h>
+#include <math.h>
 
-void BNO085_Init(BNO085_t *dev, SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, uint16_t cs_pin, GPIO_TypeDef *rst_port, uint16_t rst_pin, GPIO_TypeDef *hintn_port, uint16_t hintn_pin){
+void BNO085_Init(BNO085_t *dev, SPI_HandleTypeDef *hspi,
+                 GPIO_TypeDef *cs_port,    uint16_t cs_pin,
+                 GPIO_TypeDef *rst_port,   uint16_t rst_pin,
+                 GPIO_TypeDef *hintn_port, uint16_t hintn_pin,
+                 GPIO_TypeDef *wake_port,  uint16_t wake_pin) {
     dev->hspi       = hspi;
     dev->cs_port    = cs_port;
     dev->cs_pin     = cs_pin;
@@ -9,10 +14,13 @@ void BNO085_Init(BNO085_t *dev, SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, 
     dev->rst_pin    = rst_pin;
     dev->hintn_port = hintn_port;
     dev->hintn_pin  = hintn_pin;
+    dev->wake_port  = wake_port;
+    dev->wake_pin   = wake_pin;
 
-    // Deselect chip and ensure reset is high
-    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(dev->rst_port, dev->rst_pin, GPIO_PIN_SET);
+    // Deselect chip, ensure reset is high, WAKE stays HIGH (SPI mode)
+    HAL_GPIO_WritePin(dev->cs_port,   dev->cs_pin,   GPIO_PIN_SET);
+    HAL_GPIO_WritePin(dev->rst_port,  dev->rst_pin,  GPIO_PIN_SET);
+    HAL_GPIO_WritePin(dev->wake_port, dev->wake_pin, GPIO_PIN_SET);
 }
 
 void BNO085_HardwareReset(BNO085_t *dev){
@@ -152,56 +160,72 @@ uint16_t BNO085_ReadPacket(BNO085_t *dev, uint8_t *buffer, uint16_t buffer_size)
 
 bool BNO085_SendPacket(BNO085_t *dev, uint8_t *tx_buf, uint16_t len) {
     /*
-     * SHTP SPI is FULL DUPLEX.  The host can only write to the sensor
-     * when HINTN is LOW (sensor has data ready).  During that CS-low
-     * window both sides exchange their cargo simultaneously:
-     *   bytes [0..3]  = SHTP headers (host→sensor AND sensor→host)
-     *   bytes [4..N]  = payloads, length = max(host_payload, sensor_payload)
-     * The shorter side pads with 0x00.
+     * SHTP SPI Host Write Protocol (official CEVA/Hillcrest spec):
+     * 1. Assert WAKE (P0) LOW to signal host wants to write.
+     * 2. Wait for HINTN to go LOW (sensor acknowledges wake-up).
+     * 3. Assert CS LOW to begin transaction.
+     * 4. Transfer SHTP header + payload.
+     * 5. Deassert CS HIGH.
+     * 6. Deassert WAKE HIGH.
+     * 7. Wait for HINTN to return HIGH.
      */
 
-    /* ---- 1. Wait for HINTN LOW (sensor ready) ---- */
+    // 1. Assert WAKE LOW
+    HAL_GPIO_WritePin(dev->wake_port, dev->wake_pin, GPIO_PIN_RESET);
+
+    // 2. Wait for HINTN LOW (sensor asserts HINTN to acknowledge WAKE)
     uint32_t start = HAL_GetTick();
     while (HAL_GPIO_ReadPin(dev->hintn_port, dev->hintn_pin) == GPIO_PIN_SET) {
         if ((HAL_GetTick() - start) > 500) {
-            printf("  [FAIL] HINTN timeout – sensor asleep, cannot send.\r\n");
+            HAL_GPIO_WritePin(dev->wake_port, dev->wake_pin, GPIO_PIN_SET);
+            printf("  [FAIL] HINTN did not go LOW after WAKE (500ms timeout).\r\n");
             return false;
         }
     }
 
-    /* ---- 2. CS LOW ---- */
+    // 3. Assert CS LOW (HINTN is now LOW)
     HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, GPIO_PIN_RESET);
     for (volatile int i = 0; i < 200; i++) {}
 
-    /* ---- 3. Exchange 4-byte SHTP headers (full-duplex) ---- */
-    uint8_t rx_hdr[4] = {0};
-    HAL_SPI_TransmitReceive(dev->hspi, tx_buf, rx_hdr, 4, 100);
+    // 4. Release WAKE HIGH (per CEVA official driver: release wake once CS is asserted)
+    HAL_GPIO_WritePin(dev->wake_port, dev->wake_pin, GPIO_PIN_SET);
 
-    /* Parse sensor's header so we know how long its cargo is */
-    uint16_t sensor_pkt_len = (rx_hdr[0] | (rx_hdr[1] << 8)) & 0x7FFF;
-    uint16_t sensor_payload = (sensor_pkt_len > 4) ? (sensor_pkt_len - 4) : 0;
+    // 5. Full-duplex header exchange
+    uint8_t rx_hdr[4] = {0};
+    HAL_StatusTypeDef status = HAL_SPI_TransmitReceive(dev->hspi, tx_buf, rx_hdr, 4, 100);
+    if (status != HAL_OK) {
+        HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, GPIO_PIN_SET);
+        return false;
+    }
+
+    uint16_t sensor_len     = (rx_hdr[0] | (rx_hdr[1] << 8)) & 0x7FFF;
+    uint16_t sensor_payload = (sensor_len > 4) ? (sensor_len - 4) : 0;
     uint16_t host_payload   = (len > 4) ? (len - 4) : 0;
     uint16_t xfer_len       = (sensor_payload > host_payload) ? sensor_payload : host_payload;
 
-    /* ---- 4. Exchange payloads (full-duplex) ---- */
     if (xfer_len > 0) {
-        /* Build host TX buffer: our payload padded with zeros */
-        static uint8_t tx_pad[300] = {0};
-        static uint8_t rx_pad[300] = {0};
+        static uint8_t tx_pad[300];
+        static uint8_t rx_pad[300];
         for (uint16_t i = 0; i < 300; i++) tx_pad[i] = 0;
-        if (host_payload > 0 && host_payload <= 296) {
-            for (uint16_t i = 0; i < host_payload; i++) tx_pad[i] = tx_buf[4 + i];
+        for (uint16_t i = 0; i < host_payload && i < 296; i++) {
+            tx_pad[i] = tx_buf[4 + i];
         }
         uint16_t safe_len = (xfer_len > 296) ? 296 : xfer_len;
         HAL_SPI_TransmitReceive(dev->hspi, tx_pad, rx_pad, safe_len, 200);
     }
 
-    /* ---- 5. CS HIGH ---- */
+    // 6. Deassert CS HIGH
     for (volatile int i = 0; i < 200; i++) {}
     HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, GPIO_PIN_SET);
 
-    printf("  [TX OK] Sent %u bytes on CH%u. Sensor simultaneously sent %u bytes on CH%u.\r\n",
-           len, tx_buf[2], sensor_pkt_len, rx_hdr[2]);
+    // 7. Wait for HINTN to return HIGH
+    start = HAL_GetTick();
+    while (HAL_GPIO_ReadPin(dev->hintn_port, dev->hintn_pin) == GPIO_PIN_RESET) {
+        if ((HAL_GetTick() - start) > 50) break;
+    }
+
+    printf("  [TX OK] Sent %u bytes on CH%u (sensor replied %u bytes on CH%u)\r\n",
+           len, tx_buf[2], sensor_len, rx_hdr[2]);
 
     return true;
 }
@@ -258,28 +282,58 @@ void BNO085_Stage2_PollData(BNO085_t *dev) {
 
     uint8_t channel = packet[2];
 
-    // Sensor-Hub Input Channel (reports)
+    // Channel 3: Sensor input reports
     if (channel == 3) {
-        // Scan for Game Rotation Vector Report ID (0x08)
-        for (int i = 4; i <= (len - 14); i++) {
+        // Look for Game Rotation Vector (0x08)
+        // Usually at offset 9 after 0xFB timestamp, but search anywhere
+        for (int i = 4; i <= (int)(len - 12); i++) {
             if (packet[i] == 0x08) {
-                int16_t q_i = (int16_t)(packet[i+4] | (packet[i+5] << 8));
-                int16_t q_j = (int16_t)(packet[i+6] | (packet[i+7] << 8));
-                int16_t q_k = (int16_t)(packet[i+8] | (packet[i+9] << 8));
-                int16_t q_r = (int16_t)(packet[i+10] | (packet[i+11] << 8));
-                
-                float fi = q_i / 16384.0f;
-                float fj = q_j / 16384.0f;
-                float fk = q_k / 16384.0f;
-                float fr = q_r / 16384.0f;
-                
-                printf("Quat [r, i, j, k]: %+.3f, %+.3f, %+.3f, %+.3f\r\n", fr, fi, fj, fk);
-                return;
+                // SHTP Game Rotation Vector payload structure:
+                // packet[i]   : Report ID (0x08)
+                // packet[i+1] : Sequence number
+                // packet[i+2] : Status
+                // packet[i+3] : Delay
+                // packet[i+4..5]   : Quat I (int16, Q14)
+                // packet[i+6..7]   : Quat J (int16, Q14)
+                // packet[i+8..9]   : Quat K (int16, Q14)
+                // packet[i+10..11] : Quat Real (int16, Q14)
+                if ((i + 12) <= len) {
+                    int16_t q_i = (int16_t)(packet[i + 4]  | (packet[i + 5]  << 8));
+                    int16_t q_j = (int16_t)(packet[i + 6]  | (packet[i + 7]  << 8));
+                    int16_t q_k = (int16_t)(packet[i + 8]  | (packet[i + 9]  << 8));
+                    int16_t q_r = (int16_t)(packet[i + 10] | (packet[i + 11] << 8));
+
+                    float fi = q_i * (1.0f / 16384.0f);
+                    float fj = q_j * (1.0f / 16384.0f);
+                    float fk = q_k * (1.0f / 16384.0f);
+                    float fr = q_r * (1.0f / 16384.0f);
+
+                    // Also calculate Euler Yaw, Pitch, Roll in degrees
+                    float siny_cosp = 2.0f * (fr * fk + fi * fj);
+                    float cosy_cosp = 1.0f - 2.0f * (fj * fj + fk * fk);
+                    float yaw = 57.2957795f * (float)atan2f(siny_cosp, cosy_cosp);
+
+                    float sinp = 2.0f * (fr * fj - fk * fi);
+                    float pitch;
+                    if (fabsf(sinp) >= 1.0f)
+                        pitch = (sinp >= 0) ? 90.0f : -90.0f;
+                    else
+                        pitch = 57.2957795f * (float)asinf(sinp);
+
+                    float sinr_cosp = 2.0f * (fr * fi + fj * fk);
+                    float cosr_cosp = 1.0f - 2.0f * (fi * fi + fj * fj);
+                    float roll = 57.2957795f * (float)atan2f(sinr_cosp, cosr_cosp);
+
+                    static uint32_t last_print = 0;
+                    if ((HAL_GetTick() - last_print) >= 20) { // 50 Hz terminal update
+                        last_print = HAL_GetTick();
+                        printf("Quat: [%+.4f, %+.4f, %+.4f, %+.4f] | YPR: [%+6.1f, %+6.1f, %+6.1f] deg\r\n",
+                               fr, fi, fj, fk, yaw, pitch, roll);
+                    }
+                    return;
+                }
             }
         }
-        printf("[SensorHub CH3] %u bytes, first ID: 0x%02X\r\n", len, packet[4]);
-    } else {
-        printf("[Incoming CH%u] %u bytes received (Report 0x%02X)\r\n", channel, len, packet[4]);
     }
 }
 
