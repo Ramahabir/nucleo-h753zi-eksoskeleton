@@ -59,6 +59,8 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define BNO_HINTN0_Pin GPIO_PIN_3
 #define BNO_HINTN0_GPIO_Port GPIOF
+#define FSR_ADC0_Pin GPIO_PIN_3
+#define FSR_ADC0_GPIO_Port GPIOA
 #define BNO_CS0_Pin GPIO_PIN_14
 #define BNO_CS0_GPIO_Port GPIOD
 #define BNO_RST_Pin GPIO_PIN_15
