@@ -118,14 +118,25 @@ int main(void)
   MX_ADC1_Init();
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
+  printf("\r\n=== BNO085 IMU Initializing ===\r\n");
+  BNO085_Init(&bno1, &hspi1,
+              BNO_CS0_GPIO_Port, BNO_CS0_Pin,
+              BNO_RST_GPIO_Port, BNO_RST_Pin,
+              BNO_HINTN0_GPIO_Port, BNO_HINTN0_Pin,
+              BNO_WAKE_GPIO_Port, BNO_WAKE_Pin);
 
-  BNO085_Init(&bno1, &hspi1, BNO_CS0_GPIO_Port, BNO_CS0_Pin, BNO_RST_GPIO_Port, BNO_RST_Pin, BNO_HINTN0_GPIO_Port, BNO_HINTN0_Pin, BNO_WAKE_GPIO_Port, BNO_WAKE_Pin);
-
-  if (BNO085_Stage1_Test(&bno1) != HAL_OK) {
-    printf("BNO085 gagal terdeteksi, periksa SPI dan Power\r\n");
+  if (BNO085_HardwareReset(&bno1, 1000) != BNO085_OK) {
+      printf("[ERROR] BNO085 reset timeout! Check SPI/Power/HINTN connections.\r\n");
+  } else {
+      printf("[OK] BNO085 online!\r\n");
   }
 
-  BNO085_EnableGameRotationVector(&bno1);
+  /* Request Game Rotation Vector at 100 Hz (10 ms interval) */
+  if (BNO085_EnableGameRotationVector(&bno1, 10) == BNO085_OK) {
+      printf("[OK] Game Rotation Vector configured at 100 Hz.\r\n");
+  } else {
+      printf("[FAIL] Failed to enable rotation vector report.\r\n");
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -133,7 +144,23 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-    BNO085_Stage2_PollData(&bno1);
+
+    /* 1. Non-blocking IMU update (takes 0 CPU time if no packet is pending) */
+    BNO085_Update(&bno1);
+
+    /* 2. Application telemetry rate-limited to 20 Hz (every 50 ms) */
+    static uint32_t last_telemetry = 0;
+    if ((HAL_GetTick() - last_telemetry) >= 50) {
+        last_telemetry = HAL_GetTick();
+
+        if (bno1.data.has_new_data) {
+            bno1.data.has_new_data = false;
+            printf("Quat: [%+.3f, %+.3f, %+.3f, %+.3f] | YPR: [%+6.1f, %+6.1f, %+6.1f] deg | Acc: %u\r\n",
+                   bno1.data.q_r, bno1.data.q_i, bno1.data.q_j, bno1.data.q_k,
+                   bno1.data.yaw, bno1.data.pitch, bno1.data.roll,
+                   bno1.data.accuracy);
+        }
+    }
 
     /* USER CODE BEGIN 3 */
   }
