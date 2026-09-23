@@ -25,7 +25,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "bno085.h"  /* TEMP: commented out for FSR standalone test */
+#include "bno085.h"
+#include "fsr.h"
 #include <stdio.h>
 /* USER CODE END Includes */
 
@@ -47,7 +48,8 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-BNO085_t bno1;  /* TEMP: commented out for FSR standalone test */
+BNO085_t bno1;
+FSR_HandleTypeDef fsr1;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -58,25 +60,6 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-uint16_t FSR_ReadRaw(void){
-  uint16_t raw_val = 0;
-
-  // 1. Start ADC conversion
-  HAL_ADC_Start(&hadc1);
-
-  // 2. Wait for conversion to complete
-  if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK){
-    // 3. Read the 16 bit
-    raw_val = (uint16_t)HAL_ADC_GetValue(&hadc1);
-  }
-
-  // 4. Stop ADC
-  HAL_ADC_Stop(&hadc1);
-
-  return raw_val;
-
-
-}
 extern UART_HandleTypeDef huart3;
 int _write(int file, char *ptr, int len) {
     /* printf → USART3 (TX=PD8) → USB-TTL → COM17 */
@@ -137,6 +120,11 @@ int main(void)
   } else {
       printf("[FAIL] Failed to enable rotation vector report.\r\n");
   }
+
+  /* Initialize FSR on ADC1 (contact threshold: 15000, release: 10000, alpha: 0.3) */
+  printf("\r\n=== FSR Initializing ===\r\n");
+  FSR_Init(&fsr1, &hadc1, 15000, 10000, 0.3f);
+  printf("[OK] FSR online (Thresholds: contact=15000, release=10000)\r\n");
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -148,17 +136,28 @@ int main(void)
     /* 1. Non-blocking IMU update (takes 0 CPU time if no packet is pending) */
     BNO085_Update(&bno1);
 
-    /* 2. Application telemetry rate-limited to 20 Hz (every 50 ms) */
+    /* 2. Periodic FSR update sampled at 100 Hz (every 10 ms) */
+    static uint32_t last_fsr_sample = 0;
+    if ((HAL_GetTick() - last_fsr_sample) >= 10) {
+        last_fsr_sample = HAL_GetTick();
+        FSR_Update(&fsr1);
+    }
+
+    /* 3. Application telemetry rate-limited to 20 Hz (every 50 ms) */
     static uint32_t last_telemetry = 0;
     if ((HAL_GetTick() - last_telemetry) >= 50) {
         last_telemetry = HAL_GetTick();
 
         if (bno1.data.has_new_data) {
             bno1.data.has_new_data = false;
-            printf("Quat: [%+.3f, %+.3f, %+.3f, %+.3f] | YPR: [%+6.1f, %+6.1f, %+6.1f] deg | Acc: %u\r\n",
-                   bno1.data.q_r, bno1.data.q_i, bno1.data.q_j, bno1.data.q_k,
+            printf("IMU YPR: [%+6.1f, %+6.1f, %+6.1f] deg | FSR: raw=%5u filt=%5u (%4.2fV) [%s]\r\n",
                    bno1.data.yaw, bno1.data.pitch, bno1.data.roll,
-                   bno1.data.accuracy);
+                   fsr1.raw_adc, (uint16_t)fsr1.filtered_adc, fsr1.voltage,
+                   FSR_IsContact(&fsr1) ? "STANCE" : "SWING");
+        } else {
+            printf("IMU: waiting... | FSR: raw=%5u filt=%5u (%4.2fV) [%s]\r\n",
+                   fsr1.raw_adc, (uint16_t)fsr1.filtered_adc, fsr1.voltage,
+                   FSR_IsContact(&fsr1) ? "STANCE" : "SWING");
         }
     }
 
