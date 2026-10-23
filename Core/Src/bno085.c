@@ -47,7 +47,7 @@ BNO085_Status_t BNO085_HardwareReset(BNO085_t *dev, uint32_t timeout_ms) {
     HAL_Delay(15);
     HAL_GPIO_WritePin(dev->rst_port, dev->rst_pin, GPIO_PIN_SET);
 
-    /* 2. Wait for HINTN to assert LOW (sensor finished booting) */
+    /* 2. Wait for HINTN to assert LOW (sensor starts booting) */
     uint32_t start = HAL_GetTick();
     while (HAL_GPIO_ReadPin(dev->hintn_port, dev->hintn_pin) == GPIO_PIN_SET) {
         if ((HAL_GetTick() - start) > timeout_ms) {
@@ -55,10 +55,31 @@ BNO085_Status_t BNO085_HardwareReset(BNO085_t *dev, uint32_t timeout_ms) {
         }
     }
 
-    /* 3. Drain initial advertisement / reset report to clear HINTN */
-    uint8_t boot_buf[128];
-    BNO085_ReadPacket(dev, boot_buf, sizeof(boot_buf));
+    /* 3. Drain all boot packets until SH-2 firmware reports initialized (0xF1) and bus settles */
+    uint8_t boot_buf[300];
+    bool sh2_ready = false;
+    uint32_t drain_start = HAL_GetTick();
 
+    while ((HAL_GetTick() - drain_start) < 2000) {
+        if (HAL_GPIO_ReadPin(dev->hintn_port, dev->hintn_pin) == GPIO_PIN_RESET) {
+            uint16_t plen = BNO085_ReadPacket(dev, boot_buf, sizeof(boot_buf));
+            if (plen > 0) {
+                /* Check if this packet is the SH-2 System Initialized notification (CH2, report 0xF1) */
+                if (plen >= 5 && boot_buf[2] == SHTP_CHAN_SH2_CONFIG && boot_buf[4] == 0xF1) {
+                    sh2_ready = true;
+                }
+                drain_start = HAL_GetTick();
+            }
+        } else if (sh2_ready && ((HAL_GetTick() - drain_start) > 100)) {
+            /* SH-2 confirmed initialized and bus is quiet */
+            break;
+        } else if ((HAL_GetTick() - drain_start) > 500) {
+            /* Fallback timeout: FIFO drained */
+            break;
+        }
+    }
+
+    HAL_Delay(50);
     return BNO085_OK;
 }
 
