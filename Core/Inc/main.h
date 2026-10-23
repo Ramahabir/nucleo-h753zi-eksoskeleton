@@ -57,16 +57,28 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define BNO_HINTN0_Pin GPIO_PIN_3
-#define BNO_HINTN0_GPIO_Port GPIOF
 #define FSR_ADC0_Pin GPIO_PIN_3
 #define FSR_ADC0_GPIO_Port GPIOA
-#define BNO_CS0_Pin GPIO_PIN_14
-#define BNO_CS0_GPIO_Port GPIOD
+#define WAKE_BNO3_Pin GPIO_PIN_8
+#define WAKE_BNO3_GPIO_Port GPIOE
+#define INT_BNO1_Pin GPIO_PIN_9
+#define INT_BNO1_GPIO_Port GPIOE
+#define WAKE_BNO1_Pin GPIO_PIN_11
+#define WAKE_BNO1_GPIO_Port GPIOE
+#define INT_BNO2_Pin GPIO_PIN_13
+#define INT_BNO2_GPIO_Port GPIOE
+#define CS_BNO2_Pin GPIO_PIN_14
+#define CS_BNO2_GPIO_Port GPIOE
 #define BNO_RST_Pin GPIO_PIN_15
 #define BNO_RST_GPIO_Port GPIOD
-#define BNO_WAKE_Pin GPIO_PIN_12
-#define BNO_WAKE_GPIO_Port GPIOG
+#define CS_BNO1_Pin GPIO_PIN_12
+#define CS_BNO1_GPIO_Port GPIOG
+#define WAKE_BNO2_Pin GPIO_PIN_14
+#define WAKE_BNO2_GPIO_Port GPIOG
+#define CS_BNO3_Pin GPIO_PIN_6
+#define CS_BNO3_GPIO_Port GPIOB
+#define INT_BNO3_Pin GPIO_PIN_7
+#define INT_BNO3_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 

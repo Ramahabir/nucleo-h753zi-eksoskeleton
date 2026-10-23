@@ -133,34 +133,6 @@ int main(void)
   {
     /* USER CODE END WHILE */
 
-    /* 1. Non-blocking IMU update (takes 0 CPU time if no packet is pending) */
-    BNO085_Update(&bno1);
-
-    /* 2. Periodic FSR update sampled at 100 Hz (every 10 ms) */
-    static uint32_t last_fsr_sample = 0;
-    if ((HAL_GetTick() - last_fsr_sample) >= 10) {
-        last_fsr_sample = HAL_GetTick();
-        FSR_Update(&fsr1);
-    }
-
-    /* 3. Application telemetry rate-limited to 20 Hz (every 50 ms) */
-    static uint32_t last_telemetry = 0;
-    if ((HAL_GetTick() - last_telemetry) >= 50) {
-        last_telemetry = HAL_GetTick();
-
-        if (bno1.data.has_new_data) {
-            bno1.data.has_new_data = false;
-            printf("IMU YPR: [%+6.1f, %+6.1f, %+6.1f] deg | FSR: raw=%5u filt=%5u (%4.2fV) [%s]\r\n",
-                   bno1.data.yaw, bno1.data.pitch, bno1.data.roll,
-                   fsr1.raw_adc, (uint16_t)fsr1.filtered_adc, fsr1.voltage,
-                   FSR_IsContact(&fsr1) ? "STANCE" : "SWING");
-        } else {
-            printf("IMU: waiting... | FSR: raw=%5u filt=%5u (%4.2fV) [%s]\r\n",
-                   fsr1.raw_adc, (uint16_t)fsr1.filtered_adc, fsr1.voltage,
-                   FSR_IsContact(&fsr1) ? "STANCE" : "SWING");
-        }
-    }
-
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */

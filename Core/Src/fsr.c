@@ -82,3 +82,4 @@ void FSR_Update(FSR_HandleTypeDef *hfsr)
 
     hfsr->state_changed = (hfsr->state != prev_state);
 }
+
